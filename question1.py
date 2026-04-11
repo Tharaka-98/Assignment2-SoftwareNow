@@ -6,140 +6,196 @@ Then create a function to decrypt the content and a function to
 verify the decryption was successful.
 
 """
-def encrypt_char(ch, shift1, shift2):
-    """Encrypt a single character using the assignment rules."""
-    if ch.islower():
-        pos = ord(ch) - ord('a')  # 0-25
-        if pos <= 12:  # a-m: shift forward by shift1 * shift2
-            new_pos = (pos + shift1 * shift2) % 26
-        else:          # n-z: shift backward by shift1 + shift2
-            new_pos = (pos - (shift1 + shift2)) % 26
-        return chr(new_pos + ord('a'))
 
-    elif ch.isupper():
-        pos = ord(ch) - ord('A')  # 0-25
-        if pos <= 12:  # A-M: shift backward by shift1
-            new_pos = (pos - shift1) % 26
-        else:          # N-Z: shift forward by shift2^2
-            new_pos = (pos + shift2 ** 2) % 26
-        return chr(new_pos + ord('A'))
-
-    else:
-        # Spaces, tabs, newlines, special chars, numbers — unchanged
-        return ch
-
-
-def decrypt_char(ch, shift1, shift2):
-    """Reverse the encryption for a single character."""
+def encrypt_char(ch: str, shift1: int, shift2: int):
+    """
+    Encrypt one character and return (encrypted_char, rule_index).
+ 
+    Lowercase rules
+        pos 0-12  (a-m): new_pos = (pos + shift1*shift2) % 26   rule=0
+        pos 13-25 (n-z): new_pos = (pos - (shift1+shift2)) % 26 rule=1
+ 
+    Uppercase rules
+        pos 0-12  (A-M): new_pos = (pos - shift1) % 26          rule=0
+        pos 13-25 (N-Z): new_pos = (pos + shift2**2) % 26       rule=1
+ 
+    Non-alpha characters are returned unchanged with rule=-1.
+    """
     if ch.islower():
         pos = ord(ch) - ord('a')
-        # We need to reverse: but after encryption the letter has moved,
-        # so we reverse by applying the inverse shift and checking original range.
-        # Try reversing a-m rule: original pos = new_pos - shift1*shift2
-        candidate1 = (pos - shift1 * shift2) % 26
-        # Try reversing n-z rule: original pos = new_pos + shift1+shift2
-        candidate2 = (pos + (shift1 + shift2)) % 26
-
-        # Pick the candidate that matches its original rule's range
-        if 0 <= candidate1 <= 12:
-            return chr(candidate1 + ord('a'))
+        if pos <= 12:
+            return chr((pos + shift1 * shift2) % 26 + ord('a')), 0
         else:
-            return chr(candidate2 + ord('a'))
-
+            return chr((pos - (shift1 + shift2)) % 26 + ord('a')), 1
+ 
     elif ch.isupper():
         pos = ord(ch) - ord('A')
-        # Reverse A-M rule: original pos = new_pos + shift1
-        candidate1 = (pos + shift1) % 26
-        # Reverse N-Z rule: original pos = new_pos - shift2^2
-        candidate2 = (pos - shift2 ** 2) % 26
-
-        if 0 <= candidate1 <= 12:
-            return chr(candidate1 + ord('A'))
+        if pos <= 12:
+            return chr((pos - shift1) % 26 + ord('A')), 0
         else:
-            return chr(candidate2 + ord('A'))
-
+            return chr((pos + shift2 ** 2) % 26 + ord('A')), 1
+ 
+    else:
+        return ch, -1          # spaces, digits, punctuation — unchanged
+ 
+ 
+def encrypt_file(
+    shift1: int,
+    shift2: int,
+    input_path: str = "raw_text.txt",
+    output_path: str = "encrypted_text.txt",
+    rulemap_path: str = "encrypted_text.rulemap",
+) -> str:
+    """
+    Read *input_path*, encrypt every character, write ciphertext to
+    *output_path* and the per-character rule map to *rulemap_path*.
+ 
+    Returns the encrypted string.
+    """
+    with open(input_path, 'r', encoding='utf-8') as fh:
+        raw_text = fh.read()
+ 
+    pairs = [encrypt_char(ch, shift1, shift2) for ch in raw_text]
+    encrypted = ''.join(enc for enc, _ in pairs)
+    # Rule map: one byte per character (-1 stored as 255, 0 → 0, 1 → 1)
+    rule_bytes = bytes(r % 256 for _, r in pairs)
+ 
+    with open(output_path, 'w', encoding='utf-8') as fh:
+        fh.write(encrypted)
+ 
+    with open(rulemap_path, 'wb') as fh:
+        fh.write(rule_bytes)
+ 
+    print(f"[✓] Encrypted  '{input_path}' → '{output_path}'")
+    print(f"    Rule map saved to '{rulemap_path}'")
+    return encrypted
+ 
+ 
+#  Decryption 
+ 
+def decrypt_char(ch: str, shift1: int, shift2: int, rule: int) -> str:
+    """
+    Reverse encrypt_char exactly, given the rule that was used.
+ 
+    rule=0  → first-half rule was applied  (a-m / A-M)
+    rule=1  → second-half rule was applied (n-z / N-Z)
+    rule=-1 → non-alpha, returned unchanged
+    """
+    if ch.islower():
+        pos = ord(ch) - ord('a')
+        if rule == 0:   # reverse: pos + shift1*shift2  →  pos - shift1*shift2
+            return chr((pos - shift1 * shift2) % 26 + ord('a'))
+        else:           # reverse: pos - (shift1+shift2) →  pos + (shift1+shift2)
+            return chr((pos + (shift1 + shift2)) % 26 + ord('a'))
+ 
+    elif ch.isupper():
+        pos = ord(ch) - ord('A')
+        if rule == 0:   # reverse: pos - shift1  →  pos + shift1
+            return chr((pos + shift1) % 26 + ord('A'))
+        else:           # reverse: pos + shift2**2  →  pos - shift2**2
+            return chr((pos - shift2 ** 2) % 26 + ord('A'))
+ 
     else:
         return ch
-
-
-def encrypt_file(shift1, shift2, input_path="raw_text.txt", output_path="encrypted_text.txt"):
-    """Read raw_text.txt, encrypt it, and write to encrypted_text.txt."""
-    with open(input_path, 'r', encoding='utf-8') as f:
-        raw_text = f.read()
-
-    encrypted = ''.join(encrypt_char(ch, shift1, shift2) for ch in raw_text)
-
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write(encrypted)
-
-    print(f"[✓] Encrypted '{input_path}' → '{output_path}'")
-    return encrypted
-
-
-def decrypt_file(shift1, shift2, input_path="encrypted_text.txt", output_path="decrypted_text.txt"):
-    """Read encrypted_text.txt, decrypt it, and write to decrypted_text.txt."""
-    with open(input_path, 'r', encoding='utf-8') as f:
-        encrypted_text = f.read()
-
-    decrypted = ''.join(decrypt_char(ch, shift1, shift2) for ch in encrypted_text)
-
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write(decrypted)
-
-    print(f"[✓] Decrypted '{input_path}' → '{output_path}'")
+ 
+ 
+def decrypt_file(
+    shift1: int,
+    shift2: int,
+    input_path: str = "encrypted_text.txt",
+    output_path: str = "decrypted_text.txt",
+    rulemap_path: str = "encrypted_text.rulemap",
+) -> str:
+    """
+    Read *input_path* and *rulemap_path*, decrypt every character using the
+    stored rule indices, write plaintext to *output_path*.
+ 
+    Returns the decrypted string.
+    """
+    with open(input_path, 'r', encoding='utf-8') as fh:
+        encrypted_text = fh.read()
+ 
+    with open(rulemap_path, 'rb') as fh:
+        rule_bytes = fh.read()
+ 
+    # Convert bytes back: 255 → -1, 0 → 0, 1 → 1
+    rules = [b if b != 255 else -1 for b in rule_bytes]
+ 
+    if len(rules) != len(encrypted_text):
+        raise ValueError(
+            f"Rule map length ({len(rules)}) does not match "
+            f"ciphertext length ({len(encrypted_text)}).  "
+            "Ensure you use the rule map generated by encrypt_file."
+        )
+ 
+    decrypted = ''.join(
+        decrypt_char(ch, shift1, shift2, rule)
+        for ch, rule in zip(encrypted_text, rules)
+    )
+ 
+    with open(output_path, 'w', encoding='utf-8') as fh:
+        fh.write(decrypted)
+ 
+    print(f"[✓] Decrypted  '{input_path}' → '{output_path}'")
     return decrypted
-
-
-def verify_decryption(original_path="raw_text.txt", decrypted_path="decrypted_text.txt"):
-    """Compare raw_text.txt with decrypted_text.txt and report result."""
-    with open(original_path, 'r', encoding='utf-8') as f:
-        original = f.read()
-
-    with open(decrypted_path, 'r', encoding='utf-8') as f:
-        decrypted = f.read()
-
+ 
+ 
+# Verification
+ 
+def verify_decryption(
+    original_path: str = "raw_text.txt",
+    decrypted_path: str = "decrypted_text.txt",
+) -> bool:
+    """
+    Compare *original_path* and *decrypted_path* character-by-character.
+    Prints a PASS/FAIL verdict and returns True/False.
+    """
+    with open(original_path, 'r', encoding='utf-8') as fh:
+        original = fh.read()
+ 
+    with open(decrypted_path, 'r', encoding='utf-8') as fh:
+        decrypted = fh.read()
+ 
     if original == decrypted:
-        print("[✓] Verification PASSED: Decrypted text matches the original.")
+        print("[✓] Verification PASSED: decrypted text matches the original exactly.")
         return True
-    else:
-        # Show first difference to help debugging
-        for i, (a, b) in enumerate(zip(original, decrypted)):
-            if a != b:
-                print(f"[✗] Verification FAILED: First difference at position {i} "
-                      f"(original={repr(a)}, decrypted={repr(b)})")
-                return False
-        # One is longer than the other
-        print(f"[✗] Verification FAILED: Lengths differ "
-              f"(original={len(original)}, decrypted={len(decrypted)})")
-        return False
-
-
+ 
+    for i, (a, b) in enumerate(zip(original, decrypted)):
+        if a != b:
+            print(
+                f"[✗] Verification FAILED: first difference at position {i} "
+                f"(original={repr(a)}, decrypted={repr(b)})"
+            )
+            return False
+ 
+    print(
+        f"[✗] Verification FAILED: lengths differ "
+        f"(original={len(original)}, decrypted={len(decrypted)})"
+    )
+    return False
+ 
+ 
+#  Main 
+ 
 def main():
     print("=== HIT137 Assignment 2 — Question 1: Encryption ===\n")
-
-    # Step 1: Get shift values from user
+ 
     while True:
         try:
             shift1 = int(input("Enter shift1 (positive integer): "))
             shift2 = int(input("Enter shift2 (positive integer): "))
             if shift1 <= 0 or shift2 <= 0:
-                print("Please enter positive integers.\n")
+                print("Both values must be positive integers.\n")
                 continue
             break
         except ValueError:
-            print("Invalid input. Please enter integers.\n")
-
+            print("Invalid input — please enter whole numbers.\n")
+ 
     print()
-
-    # Step 2: Encrypt
     encrypt_file(shift1, shift2)
-
-    # Step 3: Decrypt
     decrypt_file(shift1, shift2)
-
-    # Step 4: Verify
     verify_decryption()
-
-
+ 
+ 
 if __name__ == "__main__":
     main()
